@@ -3,7 +3,7 @@
     "name":        "Predicción hTA",
     "path":        "models/gb_model_pruebas.joblib",
     "input_type":  "tabular",
-    "input_vars":  ["Demo/ART","Demo/ECG","Demo/CVP","Demo/EEG","Demo/PLETH","Demo/CO2"],
+    "input_vars":  ["Intellivue/ART", "Intellivue/ECG_III","Intellivue/CVP","Intellivue/EEG","Intellivue/PLETH","Intellivue/CO2"],
     "output_var":  "Prediccion 1",
     "window_size": 1
   },
