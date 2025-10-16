@@ -82,26 +82,68 @@ class VitalProcessor:
         self.wave_last = {cfg.get('output_var'): None for cfg in model_configs if cfg.get('input_type')=='wave'}
         # Para rastrear el último tiempo procesado por archivo para sincronización en tiempo real
         self.last_processing_time = {}
+        self.segment_length = 10000
 
     def process_once(self, recordings_dir, mode='tabular'):
+
         if mode == 'tabular':
-            return self._process_tabular(recordings_dir)
+            return self._process_tabular(recordings_dir,-1)
         elif mode == 'wave':
-            return self._process_wave(recordings_dir)
+            result = self._process_wave(recordings_dir,-1)
+            print(result[0] if result is not None else "No se procesó nada")
+            return result[0] if result is not None else None
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
-    def _process_tabular(self, recordings_dir):
+    def process_file(self, recordings_dir, mode):
+        #TODO: solventar la conexió d'això amb la resta del sistema
+        #necessito que faci fins que startpos sigui mes gran que la length
+        #i vigilar que fa amb el return
+        startpos = 0
+        dfs = []
+        ddf = pd.DataFrame()
+        while True:
+            if mode == 'tabular':
+                self.segment_length = 2000 # test
+                df = self._process_tabular(recordings_dir, startpos)
+                if df is None:
+                    break
+                startpos += self.window_rows
+            elif mode == 'wave':
+                self.segment_length = max(cfg.get('interval_secs') for cfg in self.model_configs if cfg.get('input_type') == 'wave')*2
+                result = self._process_wave(recordings_dir, startpos)
+                if result is None:
+                    break
+                df, dtstart, dtend = result
+                if startpos == 0: startpos = dtstart
+                startpos += self.segment_length
+                if startpos >= dtend:
+                    break
+            
+            dfs.append(df)
+        #ddf = pd.concat(dfs, how="vertical").unique(subset=['Tiempo'], keep='last')
+        return ddf            
+
+    def _process_tabular(self, recordings_dir, startpos=-1):
+
         vital_path = find_latest_vital(recordings_dir)
         if not vital_path:
             return None
         base = os.path.splitext(os.path.basename(vital_path))[0]
         xlsx_path = os.path.join(self.results_dir, f"{base}_tabular.xlsx")
-        first = not os.path.exists(xlsx_path)
 
         vf = vitaldb.VitalFile(vital_path, [var for cfg in self.model_configs if cfg.get('input_type') == 'tabular' for var in cfg.get('input_vars', [])])
         tracks = vf.get_track_names()
+        #TODO: reducir tracks a solo las necesarias?
+        #tracks = [var for model_config in self.model_configs if model_config.get('input_type') == 'tabular' for var in model_config.get('input_vars', [])]
+
+        if startpos < 0:        
+            vf.crop(vf.dtend - self.segment_length, vf.dtend)
+        else:       
+            vf.crop(startpos, startpos + self.segment_length)
+
         raw = vf.to_numpy(tracks, interval=0, return_timestamp=True)
+
         buffer = []
         for row in raw[-self.window_rows:]:
             t, *vals = row
@@ -118,7 +160,7 @@ class VitalProcessor:
         self._save_excel(df, xlsx_path)
         return df
 
-    def _process_wave(self, recordings_dir):
+    def _process_wave(self, recordings_dir, startpos=-1):
         """
         Procesa pipelines de onda: carga latest.vital, aplica segmentación por ventanas solapadas y modelos wave.
         Une los resultados en un único DataFrame que incluye las señales originales y las predicciones.
@@ -134,11 +176,18 @@ class VitalProcessor:
     
         base = os.path.splitext(os.path.basename(vital_path))[0]
         xlsx_path = os.path.join(self.results_dir, f"{base}_wave.xlsx")
-        first = not os.path.exists(xlsx_path)
     
         # Cargar unicamente las tracks necesarias para los modelos wave segun model.json
         vf = vitaldb.VitalFile(vital_path, [model_config.get('signal_track') for model_config in self.model_configs if model_config.get('input_type') == 'wave'])
-        # Recortar últimos 1000s para evitar procesar todo el historial
+         # Recortar últimos 1000s para evitar procesar todo el historial
+        vfstart = vf.dtstart
+        vfend = vf.dtend
+        
+        if startpos < 0:        
+            vf.crop(vf.dtend - self.segment_length, vf.dtend)
+        else:       
+            vf.crop(startpos, startpos + self.segment_length)
+
         records = []
         
         # Tiempo de inicio del procesamiento para control de tiempo real
@@ -146,6 +195,7 @@ class VitalProcessor:
         
         for cfg in self.model_configs:
             if cfg.get('input_type') != 'wave' or cfg.get('model') is None:
+                print(f"[WARNING] Debug: Saltando modelo no wave o sin modelo: {cfg.get('name')}")
                 continue
             
             # Calcular duración para este track específico
@@ -192,7 +242,7 @@ class VitalProcessor:
                 continue
             
             # Procesar solo los segmentos necesarios para mantener tiempo real
-            num_workers = max(1, os.cpu_count() // 2)
+            num_workers = max(1, os.cpu_count() or 2 // 2)
             
             if len(start_times) > batch_size:
                 # Procesar solo el siguiente lote de segmentos
@@ -261,10 +311,10 @@ class VitalProcessor:
         df = df_all
     
         self.latest_df = df.clone()
+        #Guardar unicamente las filas con al menos una predicción no nula
+        df = df.filter(~pd.all_horizontal([pd.col(cfg['output_var']).is_null() for cfg in self.model_configs if cfg.get('input_type') == 'wave']))
         self._save_excel(df, xlsx_path)
-        self._save_excel(df, xlsx_path, first)
-        return df
-
+        return [df, vfstart, vfend]
 
     def _run_predictions(self, df: pd.DataFrame):
         for cfg in self.model_configs:

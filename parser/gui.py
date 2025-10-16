@@ -17,6 +17,7 @@ class VitalApp:
         self.record_dir = tk.StringVar()
         self.use_mean = tk.BooleanVar(value=False)
         self.mode = tk.StringVar(value='tabular')   # Selector de modo
+        self.filemode = tk.StringVar(value='streaming') # Selector de tipo de entrada
 
     def _build_ui(self):
         self.root.title("Vital Processor GUI")
@@ -45,6 +46,15 @@ class VitalApp:
                   bg=LIGHT_BG, fg=FG_COLOR).grid(row=0, column=6, pady=5)
         tk.Button(top, text="Stop",  command=self._stop_loop,
                   bg=LIGHT_BG, fg=FG_COLOR).grid(row=0, column=7, pady=5)
+    
+        #TODO: streaming -> process, process_once ...
+        #TODO: recording -> file_process per processar el fitxer sencer tros a tros?
+        # Selector de modo (Streaming / .vital)
+        tk.Label(top, bg=LIGHT_BG, fg=FG_COLOR).grid(row=0, column=8, padx=(20,0))
+        tk.Radiobutton(top, text="Str", variable=self.filemode, value="streaming",
+                       bg=LIGHT_BG, fg=FG_COLOR, selectcolor=LIGHT_BG).grid(row=0, column=9)
+        tk.Radiobutton(top, text="Rec",    variable=self.filemode, value="recording",
+                       bg=LIGHT_BG, fg=FG_COLOR, selectcolor=LIGHT_BG).grid(row=0, column=10)
 
         # Consola de log
         self.log = scrolledtext.ScrolledText(self.root, bg=DARK_BG, fg=FG_COLOR, height=15)
@@ -67,6 +77,14 @@ class VitalApp:
         df = self.processor.process_once(self.record_dir.get(), mode=self.mode.get())
         if df is None:
             messagebox.showwarning("No data", "No datos válidos.")
+            self.running = False
+            return
+        self._log_tail(df)
+
+    def _process_file(self):
+        df = self.processor.process_file(self.record_dir.get(), mode=self.mode.get())
+        if df is None:
+            messagebox.showwarning("No data", "No datos válidos.")
             return
         self._log_tail(df)
 
@@ -79,9 +97,14 @@ class VitalApp:
         self.log.configure(state='disabled')
 
     def _start_loop(self):
-        if not self.running:
-            self.running = True
-            self._loop()
+
+        if self.filemode.get() == 'streaming':
+            if not self.running:
+                self.running = True
+                self._loop()
+        else:  # recording
+            self._process_file()
+
 
     def _stop_loop(self):
         self.running = False
@@ -104,5 +127,5 @@ class VitalApp:
                 continue
             value = (self.processor.latest_df[var].mean()
                      if self.use_mean.get() else self.processor.latest_df[var].iloc[-1])
-            tk.Label(win, text=f"{var}: {value:.3f}", font=(None, 16),
+            tk.Label(win, text=f"{var}: {value:.3f}", font=("TkDefaultFont", 16),
                      bg=DARK_BG, fg=FG_COLOR).pack(anchor='w', padx=10, pady=5)
