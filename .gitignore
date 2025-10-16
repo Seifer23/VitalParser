@@ -57,3 +57,5 @@ Thumbs.db
 
 # Archivos de test temporales
 test_*.py.bak
+test.vital
+vitaltest.py
