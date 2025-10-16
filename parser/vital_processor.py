@@ -115,7 +115,7 @@ class VitalProcessor:
         df = pd.DataFrame(buffer)
         df = self._run_predictions(df)
         self.latest_df = df.clone()
-        self._save_excel(df, xlsx_path, first)
+        self._save_excel(df, xlsx_path)
         return df
 
     def _process_wave(self, recordings_dir):
@@ -261,6 +261,7 @@ class VitalProcessor:
         df = df_all
     
         self.latest_df = df.clone()
+        self._save_excel(df, xlsx_path)
         self._save_excel(df, xlsx_path, first)
         return df
 
@@ -304,7 +305,7 @@ class VitalProcessor:
             df = df.with_columns(pd.Series(cfg['output_var'], preds, dtype=pd.Float64))
         return df
 
-    def _save_excel(self, df: pd.DataFrame, path: str, first: bool):
+    def _save_excel(self, df: pd.DataFrame, path: str):
     
         if not isinstance(df, PLDataFrame):
             raise TypeError("Expected a Polars DataFrame")
@@ -322,15 +323,20 @@ class VitalProcessor:
         # Elimina hoja por defecto si existe y está vacía
         if "Sheet" in wb.sheetnames and wb["Sheet"].max_row == 1:
             wb.remove(wb["Sheet"])
+            
+        #Escribimos los resultados de multiples iteraciones en una misma hoja
+        if "Resultado" not in wb.sheetnames:
+            # Crea nueva hoja
+            ws = wb.create_sheet("Resultado")
+        
+            # Escribe encabezados
+            ws.append(list(df.columns))
+        else:
+            ws = wb["Resultado"]
     
-        # Crea nueva hoja
-        ws = wb.create_sheet("Resultado")
-    
-        # Escribe encabezados
-        ws.append(df.columns)
-    
-        # Escribe filas
-        for row in df.iter_rows(named=True):
-            ws.append([row[col] for col in df.columns])
+    # Escribe filas en bloque (mucho más rápido)
+        rows = df.to_numpy()
+        for row in rows:
+            ws.append(row.tolist())
         # Guarda archivo
         wb.save(path)
