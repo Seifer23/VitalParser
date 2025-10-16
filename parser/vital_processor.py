@@ -5,7 +5,7 @@ from polars import DataFrame as PLDataFrame
 from openpyxl import load_workbook, Workbook
 from openpyxl.utils.exceptions import InvalidFileException
 from parser.vital_utils import is_nan, find_latest_vital
-from vitaldb import VitalFile
+import vitaldb
 import parser.arr as arr_utils
 from zipfile import BadZipFile
 from concurrent.futures import ThreadPoolExecutor
@@ -99,7 +99,7 @@ class VitalProcessor:
         xlsx_path = os.path.join(self.results_dir, f"{base}_tabular.xlsx")
         first = not os.path.exists(xlsx_path)
 
-        vf = VitalFile(vital_path)
+        vf = vitaldb.VitalFile(vital_path, [var for cfg in self.model_configs if cfg.get('input_type') == 'tabular' for var in cfg.get('input_vars', [])])
         tracks = vf.get_track_names()
         raw = vf.to_numpy(tracks, interval=0, return_timestamp=True)
         buffer = []
@@ -137,7 +137,8 @@ class VitalProcessor:
         first = not os.path.exists(xlsx_path)
     
         # Cargar unicamente las tracks necesarias para los modelos wave segun model.json
-        vf = VitalFile(vital_path, [model_config.get('signal_track') for model_config in self.model_configs if model_config.get('input_type') == 'wave'])
+        vf = vitaldb.VitalFile(vital_path, [model_config.get('signal_track') for model_config in self.model_configs if model_config.get('input_type') == 'wave'])
+        # Recortar últimos 1000s para evitar procesar todo el historial
         records = []
         
         # Tiempo de inicio del procesamiento para control de tiempo real
